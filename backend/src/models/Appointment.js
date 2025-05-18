@@ -1,0 +1,1 @@
+// Appointment.js - boilerplate file for backend/src/models

@@ -1,0 +1,1 @@
+// User.js - boilerplate file for backend/src/models
