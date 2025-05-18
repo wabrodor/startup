@@ -1,0 +1,1 @@
+// authMiddleware.js - boilerplate file for backend/src/middleware

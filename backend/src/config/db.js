@@ -1,0 +1,1 @@
+// db.js - boilerplate file for backend/src/config

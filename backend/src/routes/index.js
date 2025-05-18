@@ -1,0 +1,1 @@
+// index.js - boilerplate file for backend/src/routes
