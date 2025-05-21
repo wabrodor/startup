@@ -21,7 +21,13 @@ const PORT = process.env.PORT || 5000;
 const gracefulShutdown = async () => {
   console.log('\n🛑 Graceful shutdown initiated...');
 
+   const timeout = setTimeout(() => {
+    console.error('⏰ Forcefully exiting after 10 seconds...');
+    process.exit(1);
+  }, 10000);
+
   try {
+    console.log("awaiting active connections to terminate")
     await closeServer();
     console.log('✅ HTTP server closed');
 
@@ -29,9 +35,10 @@ const gracefulShutdown = async () => {
       await mongoose.connection.close();
       console.log('✅ MongoDB connection closed');
     }
-
+clearTimeout(timeout); 
     process.exit(0);
   } catch (err) {
+     clearTimeout(timeout);
     console.error('❌ Error during shutdown:', err);
     process.exit(1);
   }
@@ -53,5 +60,15 @@ console.error('❌ Failed to start server due to:', err.message || err);
  
 process.on('SIGINT', gracefulShutdown);
 process.on('SIGTERM', gracefulShutdown);
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection:', reason);
+  gracefulShutdown();
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err);
+  gracefulShutdown();
+});
 
 startServer()

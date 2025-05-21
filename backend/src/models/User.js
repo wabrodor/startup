@@ -3,8 +3,15 @@ const mongoose = require('mongoose');
 const userSchema = new mongoose.Schema({
   role: {
     type: String,
-    enum: ['superAdmin', 'admin', 'patient', 'doctor', 'specialist'],
+    enum: ['superAdmin', 'admin', 'patient', 'doctor', 'specialist', "staff"],
     required: true
+  },
+    name: {
+    type: String,
+    trim: true,
+    required: function () {
+      return this.role === 'staff'; // require name only for staff, optional for others
+    }
   },
 
   email: {
@@ -38,6 +45,12 @@ const userSchema = new mongoose.Schema({
   specialistId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Specialist'
+  },
+
+    clinicId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Clinic'
+    // Only set for: role = 'admin' or 'staff'
   },
 
   isActive: {

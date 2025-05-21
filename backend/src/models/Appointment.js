@@ -5,23 +5,29 @@ const appointmentSchema = new mongoose.Schema({
   clinicId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Clinic',
-    required: true
   },
   patientId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Patient',
     required: true
   },
-  generalPractitionerId: {
+  Doctors: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Doctor',  // General practitioners are doctors in your schema
-    required: true
   },
+
   specialistId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Specialist',
     required: false
   },
+
+    // 🔹 Booking Source
+  createdByPatient: {
+    type: Boolean,
+    default: false // true if patient booked via app directly
+  },
+
 
   appointmentDate: {
     type: Date,
@@ -48,11 +54,10 @@ const appointmentSchema = new mongoose.Schema({
   },
   paymentAmount: { type: Number, default: 0 },
 
-  createdBy: {  // Who created the appointment (user id)
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  }
+    paymentId: {
+    type: String // e.g., Razorpay or Stripe txn id
+  },
+
 
 }, { timestamps: true });
 

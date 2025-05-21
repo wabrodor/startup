@@ -9,11 +9,11 @@ const clinicSchema = new mongoose.Schema({
 
   // 🔹 Address
   address: {
-    line1: { type: String, required: true },
+    line1: { type: String, required: false },
     line2: { type: String },
-    city: { type: String, required: true },
-    state: { type: String, required: true },
-    pincode: { type: String, required: true },
+    city: { type: String, required: false},
+    state: { type: String, required: false },
+    pincode: { type: String, required: false },
     country: { type: String, default: 'India' }
   },
 
@@ -21,7 +21,7 @@ const clinicSchema = new mongoose.Schema({
   adminUser: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
+    required: false
   },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
@@ -48,7 +48,10 @@ const clinicSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Specialist'
   }],
-
+ staffs: [{
+   type: mongoose.Schema.Types.ObjectId,
+    ref: 'Staff'
+ }],
   // 🔹 Patients
   patients: [{
     type: mongoose.Schema.Types.ObjectId,

@@ -1,0 +1,33 @@
+# Node dependencies
+/backend/node_modules/
+/frontend/node_modules/
+
+# Environment variables
+/backend/.env
+/frontend/.env
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+*.log
+
+# npm logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build outputs
+/backend/dist/
+/frontend/android/app/build/
+/frontend/ios/build/
+/frontend/.expo/
+
+# Metro & React Native cache
+/frontend/.expo-shared/
+/frontend/.idea/
+/frontend/.vscode/
+/frontend/.babelrc
+/frontend/.watchmanconfig
+
+# Optional: exclude coverage/test output
+/coverage/

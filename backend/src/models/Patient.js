@@ -16,16 +16,17 @@ const patientSchema = new mongoose.Schema({
   },
 
   // 🔹 Assigned Doctor & General Physician
-  doctor: {
+  assignedDoctor: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Doctor',
     required: true
   },
-  generalPhysician: {
+
+   platformDoctor: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Specialist',
-    required: true
+    ref: 'Doctor',
   },
+
 
   // 🔹 Personal Information
   name: {
@@ -185,7 +186,5 @@ patientSchema.pre('save', function (next) {
   next();
 });
 
-// Filter index by phone
-patientSchema.index({ phone: 1 });
 
 module.exports = mongoose.model('Patient', patientSchema);
