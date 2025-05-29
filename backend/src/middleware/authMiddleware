@@ -1,0 +1,363 @@
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+const SecurityService = require('../utils/securityService');
+const crypto = require('crypto');
+
+// Constants
+const TOKEN_TYPES = {
+  BEARER: 'Bearer',
+  JWT: 'JWT'
+};
+
+const SECURITY_EVENTS = {
+  ACCESS_DENIED: 'ACCESS_DENIED',
+  SESSION_EXPIRED: 'SESSION_EXPIRED',
+  SUSPICIOUS_ACTIVITY: 'SUSPICIOUS_ACTIVITY',
+  UNAUTHORIZED_ACCESS: 'UNAUTHORIZED_ACCESS',
+  TOKEN_ERROR: 'TOKEN_ERROR',
+};
+
+const SEVERITY_LEVELS = {
+  LOW: 'LOW',
+  MEDIUM: 'MEDIUM',
+  HIGH: 'HIGH',
+  CRITICAL: 'CRITICAL'
+};
+
+
+function extractToken(req) {
+  const authHeader = req.headers['authorization'];
+  
+  if (!authHeader) {
+    return { token: null, error: 'Authorization header missing' };
+  }
+
+  const parts = authHeader.split(' ');
+  
+  if (parts.length !== 2) {
+    return { token: null, error: 'Invalid authorization header format' };
+  }
+
+  const [scheme, token] = parts;
+  
+  if (!['Bearer', 'JWT'].includes(scheme)) {
+    return { token: null, error: 'Invalid authorization scheme' };
+  }
+
+  if (!token || token.length === 0) {
+    return { token: null, error: 'Token missing from authorization header' };
+  }
+
+  return { token, error: null };
+}
+
+
+function validateJwtToken(token) {
+  try {
+    const secret = process.env.JWT_SECRET;
+    
+
+    const decoded = jwt.verify(token, secret, {
+      algorithms: ['HS256'], // Explicitly specify allowed algorithms
+      maxAge: process.env.JWT_EXPIRY || '24h',
+      issuer: process.env.JWT_ISSUER || 'your-app-name',
+      audience: process.env.JWT_AUDIENCE || 'your-app-users'
+    });
+
+    // Validate required claims
+    if (!decoded.id || !decoded.iat || !decoded.exp) {
+      throw new Error('Token missing required claims');
+    }
+
+    return { decoded, error: null };
+  } catch (err) {
+    let errorType = 'TOKEN_VALIDATION_ERROR';
+    
+    if (err.name === 'TokenExpiredError') {
+      errorType = 'TOKEN_EXPIRED';
+    } else if (err.name === 'JsonWebTokenError') {
+      errorType = 'TOKEN_MALFORMED';
+    } else if (err.name === 'NotBeforeError') {
+      errorType = 'TOKEN_NOT_ACTIVE';
+    }
+
+    return { 
+      decoded: null, 
+      error: {
+        type: errorType,
+        message: err.message
+      }
+    };
+  }
+}
+
+
+async function validateUserSession(user, decoded, req) {
+  try {
+    // Check if user account is active
+    if (!user.isActive) {
+      return { 
+        isValid: false, 
+        error: 'User account is inactive or deleted' 
+      };
+    }
+
+    // Check if user is locked
+    if (user.isLocked && user.lockExpiry > new Date()) {
+      return { 
+        isValid: false, 
+        error: 'User account is temporarily locked' 
+      };
+    }
+
+    // Validate session token if present
+    if (decoded.sessionToken) {
+      const isSessionValid = await user.validateSession(decoded.sessionToken);
+      if (!isSessionValid) {
+        return { 
+          isValid: false, 
+          error: 'Session token invalid or expired' 
+        };
+      }
+    }
+
+    // Check for concurrent session limits
+    if (user.maxConcurrentSessions && decoded.sessionId) {
+      const activeSessions = await user.getActiveSessions();
+      if (activeSessions.length > user.maxConcurrentSessions) {
+        return { 
+          isValid: false, 
+          error: 'Maximum concurrent sessions exceeded' 
+        };
+      }
+    }
+
+    // Update last activity
+    await user.updateLastActivity(req.ip, req.get('User-Agent'));
+
+    return { isValid: true, error: null };
+  } catch (err) {
+    return { 
+      isValid: false, 
+      error: `Session validation error: ${err.message}` 
+    };
+  }
+}
+
+/**
+ * Check if user has required roles/permissions
+ * @param {Object} user - User object
+ * @param {Array|string} requiredRoles - Required roles (can be array or single role)
+ * @param {Array|string} requiredPermissions - Required permissions (optional)
+ * @returns {Object} - { hasAccess, error }
+ */
+function checkUserAuthorization(user, requiredRoles = []) {
+  try {
+    // Normalize inputs to arrays
+    const roles = Array.isArray(requiredRoles) ? requiredRoles : [requiredRoles];
+
+    // Skip check if no requirements
+    if (roles.length === 0 ) {
+      return { hasAccess: true, error: null };
+    }
+
+    // Check roles
+    if (roles.length > 0) {
+      const userRoles = Array.isArray(user.roles) ? user.roles : [user.role];
+      const hasRequiredRole = roles.some(role => userRoles.includes(role));
+      
+      if (!hasRequiredRole) {
+        return {
+          hasAccess: false,
+          error: `User role(s) [${userRoles.join(', ')}] not authorized. Required: [${roles.join(', ')}]`
+        };
+      }
+    }
+
+    return { hasAccess: true, error: null };
+  } catch (err) {
+    return {
+      hasAccess: false,
+      error: `Authorization check error: ${err.message}`
+    };
+  }
+}
+
+/**
+ * Enhanced role-based access control middleware
+ * @param {Array|string} requiredRoles - Required roles
+ * @returns {Function} - Express middleware function
+ */
+function requireAuth(requiredRoles = []) {
+  return [
+    async (req, res, next) => {
+      const startTime = Date.now();
+      
+      try {
+        // Step 1: Extract token from headers
+        const { token, error: tokenError } = extractToken(req);
+        if (tokenError) {
+          await SecurityService.logSecurityEvent(
+            null,
+            SECURITY_EVENTS.ACCESS_DENIED,
+            tokenError,
+            req,
+            SEVERITY_LEVELS.MEDIUM,
+            { step: 'token_extraction' }
+          );
+          return res.status(401).json({ 
+            success: false,
+            message: 'Authentication required',
+            code: 'AUTH_TOKEN_MISSING'
+          });
+        }
+
+        // Step 2: Validate JWT token
+        const { decoded, error: jwtError } = validateJwtToken(token);
+        if (jwtError) {
+          await SecurityService.logSecurityEvent(
+            null,
+            SECURITY_EVENTS.TOKEN_ERROR,
+            `JWT validation failed: ${jwtError.message}`,
+            req,
+            SEVERITY_LEVELS.HIGH,
+            { 
+              step: 'token_validation',
+              errorType: jwtError.type 
+            }
+          );
+          return res.status(401).json({ 
+            success: false,
+            message: 'Invalid or expired token',
+            code: jwtError.type
+          });
+        }
+
+        // Step 3: Fetch user from database
+        const user = await User.findById(decoded.id)
+          .select('+isActive  +isLocked +lockExpiry +roles +lastActivity')
+          .lean(false); // Keep mongoose document for methods
+
+        if (!user) {
+          await SecurityService.logSecurityEvent(
+            decoded.id,
+            SECURITY_EVENTS.ACCESS_DENIED,
+            'Token contains invalid user ID',
+            req,
+            SEVERITY_LEVELS.HIGH,
+            { step: 'user_lookup' }
+          );
+          return res.status(401).json({ 
+            success: false,
+            message: 'Invalid token',
+            code: 'USER_NOT_FOUND'
+          });
+        }
+
+        // Step 4: Validate user session
+        const { isValid: sessionValid, error: sessionError } = await validateUserSession(user, decoded, req);
+        if (!sessionValid) {
+          await SecurityService.logSecurityEvent(
+            user._id,
+            SECURITY_EVENTS.SESSION_EXPIRED,
+            sessionError,
+            req,
+            SEVERITY_LEVELS.HIGH,
+            { step: 'session_validation' }
+          );
+          return res.status(401).json({ 
+            success: false,
+            message: 'Session expired. Please login again.',
+            code: 'SESSION_INVALID'
+          });
+        }
+
+        // Step 5: Check for suspicious activity
+        const suspiciousActivity = await SecurityService.detectSuspiciousActivity(req, user);
+        if (suspiciousActivity.isSuspicious) {
+          await SecurityService.logSecurityEvent(
+            user._id,
+            SECURITY_EVENTS.SUSPICIOUS_ACTIVITY,
+            suspiciousActivity.reason,
+            req,
+            SEVERITY_LEVELS.CRITICAL,
+            { 
+              step: 'suspicious_activity_check',
+              indicators: suspiciousActivity.indicators
+            }
+          );
+          
+          // Don't block immediately, but flag for monitoring
+          // In production, you might want to require additional verification
+        }
+
+        // Step 6: Check role-based authorization
+        const { hasAccess, error: authError } = checkUserAuthorization(user, requiredRoles);
+        if (!hasAccess) {
+          await SecurityService.logSecurityEvent(
+            user._id,
+            SECURITY_EVENTS.UNAUTHORIZED_ACCESS,
+            authError,
+            req,
+            SEVERITY_LEVELS.HIGH,
+            { 
+              step: 'authorization_check',
+              requiredRoles,
+              requiredPermissions,
+              userRoles: user.roles || [user.role]
+            }
+          );
+          return res.status(403).json({ 
+            success: false,
+            message: 'Access denied: insufficient permissions',
+            code: 'INSUFFICIENT_PERMISSIONS'
+          });
+        }
+
+        // Step 7: Attach user data to request
+        req.token = token;
+        req.user = user;
+        req.decoded = decoded;
+        req.authTime = Date.now() - startTime;
+
+        // Add security headers
+        res.set({
+          'X-Auth-User-Id': user._id.toString(),
+          'X-Auth-Timestamp': new Date().toISOString(),
+          'X-Content-Type-Options': 'nosniff',
+          'X-Frame-Options': 'DENY',
+          'X-XSS-Protection': '1; mode=block'
+        });
+
+        next();
+      } catch (err) {
+        // Log unexpected errors
+        await SecurityService.logSecurityEvent(
+          req.user?._id || null,
+          SECURITY_EVENTS.TOKEN_ERROR,
+          `Unexpected auth error: ${err.message}`,
+          req,
+          SEVERITY_LEVELS.CRITICAL,
+          { 
+            step: 'unexpected_error',
+            stack: err.stack
+          }
+        );
+        
+        return res.status(500).json({ 
+          success: false,
+          message: 'Authentication service temporarily unavailable',
+          code: 'AUTH_SERVICE_ERROR'
+        });
+      }
+    }
+  ];
+}
+
+
+module.exports = {
+  requireAuth,
+  checkUserAuthorization,
+  extractToken,
+  validateJwtToken,
+};

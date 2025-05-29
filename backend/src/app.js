@@ -8,16 +8,25 @@ const setupSwagger =  require("./swagger")
 app.use(cors())
 
 app.use(express.json())
-app.use((req, res, next) =>{
-    if ((req.method === 'POST' || req.method === "PUT") && !req.is("json"))
-    
-        return res.status(400).json(({
-            error: "Conten type must be application/json"
-       
-    }))
-    next()
 
-})
+app.use((req, res, next) => {
+    if (req.method === 'POST' || req.method === 'PUT') {
+        // Check content type first
+        if (!req.is("json")) {
+            return res.status(400).json({
+                error: "Content type must be application/json"
+            });
+        }
+        
+        // Check if body is empty
+        if (!req.body || Object.keys(req.body).length === 0) {
+            return res.status(400).json({
+                error: "Request body cannot be empty"
+            });
+        }
+    }
+    next();
+});
 
 
 app.get("/", (req, res) =>{
